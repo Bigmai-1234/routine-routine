@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>桌面待办</title>
+    <style>
+        :root {
+            --bg-main: #0d0d12;
+            --bg-panel: rgba(255, 255, 255, 0.05);
+            --bg-hover: rgba(255, 255, 255, 0.1);
+            --border: rgba(255, 255, 255, 0.08);
+            --text-main: #ededed;
+            --text-dim: #888891;
+            --accent: #5e6ad2;
+            --urgent: #ff5e5e;
+            --medium: #f5b041;
+            --low: #32d74b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg-main);
+            color: var(--text-main);
+            width: 360px;
+            min-height: 520px;
+            padding: 32px 12px 12px 12px;
+            user-select: none;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 专门用于拖拽的透明顶部区域 */
+        .drag-region {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 40px;
+            z-index: 1; /* 置于底层，避免阻挡其他点击 */
+        }
+
+        /* macOS 风格按钮 */
+        .macos-controls {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            display: flex;
+            gap: 6px;
+            z-index: 20;
+        }
+
+        .macos-btn {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: 0.2s;
+            background-size: 8px 8px;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        
+        .macos-btn:hover { filter: brightness(0.8); }
+        
+        .btn-close { 
+            background-color: #ff5f56; 
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1.5 1.5 L6.5 6.5 M6.5 1.5 L1.5 6.5' stroke='%234d0000' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E");
+        }
+        
+        .btn-min { 
+            background-color: #ffbd2e; 
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1.5 4 L6.5 4' stroke='%23804800' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        }
+        
+        .btn-max { 
+            background-color: #27c93f; 
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1.5 1.5 L5 1.5 L1.5 5 Z M6.5 6.5 L3 6.5 L6.5 3 Z' fill='%23004d00'/%3E%3C/svg%3E");
+        }
+
+        .header { position: relative; padding-top: 10px; margin-bottom: 12px; }
+
+        .clock-btn {
+            position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+            background: transparent; border: none; color: var(--text-dim); font-size: 13px;
+            cursor: pointer; height: 26px; padding: 0 10px; border-radius: 13px;
+            display: flex; align-items: center; justify-content: center; gap: 6px; transition: 0.2s; z-index: 10;
+        }
+        .clock-btn:hover { background: var(--bg-hover); color: var(--text-main); }
+        .clock-btn.active { color: var(--accent); background: var(--bg-panel); }
+
+        .hide { display: none !important; }
+
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 0 4px; z-index: 10; position: relative; }
+        .calendar-header span { font-size: 14px; font-weight: 600; letter-spacing: 1px; }
+        .calendar-header button { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 2px 8px; border-radius: 4px; transition: 0.2s; }
+        .calendar-header button:hover { background: var(--bg-hover); color: var(--text-main); }
+
+        .calendar { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 6px; backdrop-filter: blur(10px); z-index: 10; position: relative;}
+        .calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 10px; color: var(--text-dim); margin-bottom: 4px; }
+        .calendar-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+        .calendar-day { aspect-ratio: 1.2; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; font-size: 12px; position: relative; transition: 0.2s; }
+        .calendar-day:hover { background: var(--bg-hover); }
+        .calendar-day.other-month { color: #444; }
+        .calendar-day.today { color: var(--accent); font-weight: bold; }
+        .calendar-day.selected { background: rgba(94, 106, 210, 0.2); border: 1px solid var(--accent); }
+        .calendar-day .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); position: absolute; bottom: 2px; }
+
+        .toolbar { display: flex; gap: 8px; margin: 12px 0; }
+        .toolbar button { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text-main); cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.2s; }
+        .toolbar button.primary { background: var(--accent); border: none; }
+        .toolbar button.active { background: rgba(94, 106, 210, 0.15); border-color: var(--accent); color: var(--accent); }
+        .toolbar button:hover { filter: brightness(1.2); }
+
+        .todo-list { display: flex; flex-direction: column; gap: 6px; position: relative; z-index: 10;}
+        .todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; transition: 0.2s; position: relative; }
+        .todo-item:hover { background: var(--bg-hover); }
+        .todo-item.done { opacity: 0.4; }
+        .todo-item.done .todo-text { text-decoration: line-through; }
+
+        .item-left-zone { display: grid; grid-template-columns: repeat(2, 18px); grid-template-rows: repeat(2, 18px); gap: 4px; flex-shrink: 0; padding-top: 2px; align-items: center; justify-items: center; }
+        
+        .urgency-icon { width: 12px; height: 12px; border-radius: 50%; cursor: pointer; box-shadow: 0 0 8px rgba(0,0,0,0.5); }
+        .urgency-red { background: var(--urgent); }
+        .urgency-yellow { background: var(--medium); }
+        .urgency-green { background: var(--low); }
+
+        .expand-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; }
+        .expand-btn.open { transform: rotate(90deg); color: var(--accent); }
+        .expand-btn.has-sub { color: var(--text-main); } 
+
+        .icon-btn { background: transparent; border: none; font-size: 13px; cursor: pointer; width: 22px; height: 22px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: 0.2s; filter: grayscale(100%) opacity(0.5); }
+        .icon-btn:hover:not(.disabled) { background: var(--bg-hover); filter: grayscale(0%) opacity(1); }
+        .icon-btn.active { filter: grayscale(0%) opacity(1) drop-shadow(0 0 4px rgba(75, 163, 227, 0.6)); }
+        .icon-btn.disabled { opacity: 0.2; cursor: not-allowed; }
+
+        .todo-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+        .todo-text { font-size: 13px; line-height: 1.4; word-break: break-all; }
+        .todo-link { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; cursor: pointer; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; width: fit-content; max-width: 100%; }
+        .todo-link:hover { color: var(--accent); background: rgba(94, 106, 210, 0.1); }
+        
+        .todo-actions { display: flex; flex-direction: column; gap: 4px; opacity: 0; transition: 0.2s; }
+        .todo-item:hover .todo-actions { opacity: 1; }
+        .todo-actions button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; }
+        .todo-actions button:hover { color: var(--text-main); }
+        
+        .subtasks-container { margin-top: 8px; padding-left: 8px; display: none; flex-direction: column; gap: 6px; }
+        .subtasks-container.open { display: flex; }
+        .subtask-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+        .subtask-status { width: 14px; height: 14px; border-radius: 3px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; transition: 0.2s; }
+        .status-todo { border: 1px solid var(--text-dim); background: transparent; color: transparent; }
+        .status-doing { background: var(--medium); color: var(--bg-main); border: none; }
+        .status-done { background: var(--low); color: var(--bg-main); border: none; }
+        .subtask-text { flex: 1; color: var(--text-dim); line-height: 1.3; }
+        .subtask-text.done { text-decoration: line-through; opacity: 0.5; }
+        .subtask-actions button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 4px;}
+        .subtask-actions button:hover { color: var(--urgent); }
+        .add-subtask { font-size: 11px; color: var(--accent); cursor: pointer; display: inline-block; padding-top: 4px; }
+
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 100; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #1c1c23; border: 1px solid var(--border); padding: 20px; border-radius: 16px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .modal h3 { font-size: 15px; margin-bottom: 16px; font-weight: 600; }
+        .modal-row { margin-bottom: 12px; }
+        .modal-row label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+        .modal-row input[type="text"] { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); color: var(--text-main); font-size: 13px; outline: none; transition: 0.2s; }
+        .modal-row input[type="range"] { width: 100%; cursor: pointer; }
+        .modal-row input:focus { border-color: var(--accent); }
+        .file-input-wrapper { display: flex; gap: 6px; }
+        .file-input-wrapper button { padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text-main); cursor: pointer; font-size: 12px; }
+        .urgency-selector { display: flex; gap: 16px; }
+        .urgency-option { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--text-dim); }
+        .urgency-option .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid transparent; }
+        .urgency-option.selected { color: var(--text-main); font-weight: 500; }
+        .urgency-option.selected .dot { box-shadow: 0 0 0 2px var(--bg-main), 0 0 0 4px var(--text-dim); }
+        .modal-actions { display: flex; gap: 8px; margin-top: 20px; }
+        .modal-actions button { flex: 1; padding: 8px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-secondary { background: var(--bg-panel); color: var(--text-main); border: 1px solid var(--border); }
+        /* 历史记录按钮 */
+/* 历史记录按钮 - 与时钟水平对齐 */
+.history-btn {
+    position: absolute;
+    top: 6px; /* 与时钟按钮顶边距一致 */
+    right: 12px;
+    background: transparent;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    height: 26px; /* 与时钟按钮高度一致 */
+    padding: 0 8px;
+    border-radius: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    transition: 0.2s;
+    opacity: 0.6;
+}
+.history-btn:hover {
+    background: var(--bg-hover);
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+/* 历史记录弹窗及条目样式 */
+#allRecordsModal .modal {
+    width: 340px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+.records-list {
+    overflow-y: auto;
+    max-height: 450px;
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 4px;
+}
+.records-list::-webkit-scrollbar { width: 4px; }
+.records-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.record-item {
+    background: var(--bg-panel);
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+.record-item-header {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-size: 11px;
+}
+    </style>
+</head>
+<body>
+    <div class="drag-region pywebview-drag-region"></div>
+    
+    <div class="macos-controls">
+        <button class="macos-btn btn-close" onclick="safeClose()"></button>
+        <button class="macos-btn btn-min" onclick="minimizeApp()"></button>
+        <button class="macos-btn btn-max" onclick="maximizeApp()"></button>
+    </div>
+
+    <button class="clock-btn" onclick="toggleCalendar()">
+        🕒<span id="topDateDisplay" style="font-size:12px; font-weight:600; font-variant-numeric: tabular-nums;"></span>
+    </button>
+
+    <button class="history-btn" onclick="showAllRecords()" title="所有任务记录">📖</button>
+    
+    <div class="header">
+        <div id="calendarWrapper" class="hide">
+            <div class="calendar-header">
+                <button onclick="changeMonth(-1)">◀</button>
+                <span id="monthTitle"></span>
+                <button onclick="changeMonth(1)">▶</button>
+            </div>
+            <div class="calendar">
+                <div class="calendar-weekdays">
+                    <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                </div>
+                <div class="calendar-days" id="calendarDays"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <button class="primary" onclick="openModal()">+ 新建任务</button>
+        <button id="viewModeBtn" onclick="toggleViewMode()">任务列表</button>
+    </div>
+
+    <div class="todo-list" id="todoList"></div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal">
+            <h3 id="modalTitle">添加任务</h3>
+            <div class="modal-row">
+                <label>任务内容</label>
+                <input type="text" id="inputText" placeholder="输入待办事项..." autocomplete="off">
+            </div>
+            <div class="modal-row">
+                <label>优先级</label>
+                <div class="urgency-selector">
+                    <div class="urgency-option selected" data-val="red" onclick="selectUrgency(this)"><div class="dot urgency-red"></div>高</div>
+                    <div class="urgency-option" data-val="yellow" onclick="selectUrgency(this)"><div class="dot urgency-yellow"></div>中</div>
+                    <div class="urgency-option" data-val="green" onclick="selectUrgency(this)"><div class="dot urgency-green"></div>低</div>
+                </div>
+            </div>
+            <div class="modal-row">
+                <label>关联本地目录</label>
+                <div class="file-input-wrapper">
+                    <input type="text" id="inputLink" placeholder="例如: D:\Projects\App">
+                    <button type="button" onclick="browseFolder()">浏览</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal()">取消</button>
+                <button class="btn-primary" onclick="saveTodo()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="globalSettingModal" style="z-index: 150;">
+        <div class="modal" style="width: 280px;">
+            <h3>设置全局日常任务</h3>
+            <input type="hidden" id="globalTaskId">
+            <div class="modal-row">
+                <label>沿袭时间 <span id="globalDaysDisplay" style="color:var(--accent);">永远</span></label>
+                <input type="range" id="globalDaysSlider" min="0" max="5" value="0" step="1" oninput="updateGlobalDaysDisplay(this.value)">
+                <div style="font-size: 11px; color: var(--text-dim); margin-top: 8px;">控制此全局任务会在未来多长时间内重复出现。</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeGlobalModal()">取消</button>
+                <button class="btn-primary" onclick="saveGlobalSetting()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="unifiedConfirmModal" style="z-index: 200;">
+        <div class="modal" style="width: 250px; padding: 20px; text-align: center;">
+            <div id="unifiedConfirmText" style="font-size: 13px; line-height: 1.5; color: var(--text-main); margin-bottom: 16px; white-space: pre-wrap;"></div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-secondary" id="unifiedCancelBtn" onclick="handleUnifiedCancel()" style="flex: 1; padding: 6px; font-size: 12px;">取消</button>
+                <button class="btn-primary" id="unifiedOkBtn" onclick="handleUnifiedOk()" style="flex: 1; padding: 6px; font-size: 12px;">确定</button>
+            </div>
+        </div>
+    </div>
+
+        <div class="modal-overlay" id="allRecordsModal" style="z-index: 250;">
+        <div class="modal">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h3 style="margin: 0;">所有任务记录</h3>
+                <button onclick="closeAllRecords()" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:18px; transition:0.2s;">×</button>
+            </div>
+            <div class="records-list" id="recordsListContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        let todos = []; 
+        let selectedDate = formatDate(new Date());
+        let currentYear = new Date().getFullYear();
+        let currentMonth = new Date().getMonth();
+        
+        let editingId = null;
+        let selectedUrgency = 'red';
+        let expandedTasks = new Set();
+        let addingSubtaskForId = null;
+        
+        let viewMode = 'all'; 
+        let clickTimer = null; 
+
+        let currentConfirmCallback = null;
+        let currentCancelCallback = null;
+
+        // 全局任务拖动条离散值映射
+        const globalDaysMap = {
+            0: { days: 0, text: '永远' },
+            1: { days: 3, text: '3 天' },
+            2: { days: 7, text: '一周' },
+            3: { days: 30, text: '一月' },
+            4: { days: 90, text: '一季' },
+            5: { days: 365, text: '一年' }
+        };
+
+        window.addEventListener('pywebviewready', () => initApp());
+        setTimeout(() => { if (!window.pywebview) initApp(); }, 500);
+
+        async function initApp() {
+            if (window.pywebview) {
+                try {
+                    const dataStr = await window.pywebview.api.load_data();
+                    todos = JSON.parse(dataStr);
+                } catch (e) { todos = []; }
+            } else {
+                todos = JSON.parse(localStorage.getItem('todos') || '[]');
+            }
+            renderCalendar();
+            renderList();
+        }
+
+        async function saveData() {
+            if (window.pywebview) {
+                await window.pywebview.api.save_data(JSON.stringify(todos));
+            } else {
+                localStorage.setItem('todos', JSON.stringify(todos));
+            }
+        }
+
+        async function safeClose() {
+            await saveData(); 
+            if (window.pywebview) window.pywebview.api.close_app();
+            else window.close(); 
+        }
+
+        async function minimizeApp() {
+            if (window.pywebview) window.pywebview.api.minimize_app();
+        }
+
+        async function maximizeApp() {
+            if (window.pywebview) window.pywebview.api.toggle_maximize_app();
+        }
+
+        function updateGlobalDaysDisplay(val) {
+            document.getElementById('globalDaysDisplay').textContent = globalDaysMap[val].text;
+        }
+
+        function showConfirm(message, onConfirm, onCancel = null, okText = '确定', okColor = 'var(--urgent)', showCancel = true) {
+            document.getElementById('unifiedConfirmText').textContent = message;
+            
+            const okBtn = document.getElementById('unifiedOkBtn');
+            okBtn.textContent = okText;
+            okBtn.style.background = okColor;
+
+            const cancelBtn = document.getElementById('unifiedCancelBtn');
+            cancelBtn.style.display = showCancel ? 'block' : 'none';
+
+            currentConfirmCallback = onConfirm;
+            currentCancelCallback = onCancel;
+
+            document.getElementById('unifiedConfirmModal').classList.add('show');
+        }
+
+        function closeUnifiedConfirm() {
+            document.getElementById('unifiedConfirmModal').classList.remove('show');
+            currentConfirmCallback = null;
+            currentCancelCallback = null;
+        }
+
+        function handleUnifiedOk() {
+            if (currentConfirmCallback) currentConfirmCallback();
+            closeUnifiedConfirm();
+        }
+
+        function handleUnifiedCancel() {
+            if (currentCancelCallback) currentCancelCallback();
+            closeUnifiedConfirm();
+        }
+
+        function toggleCalendar() {
+            const wrapper = document.getElementById('calendarWrapper');
+            const btn = document.querySelector('.clock-btn');
+            
+            if (wrapper.classList.contains('hide')) {
+                wrapper.classList.remove('hide');
+                btn.classList.add('active');
+            } else {
+                wrapper.classList.add('hide');
+                btn.classList.remove('active');
+                const today = new Date();
+                selectedDate = formatDate(today);
+                currentYear = today.getFullYear();
+                currentMonth = today.getMonth();
+                renderCalendar();
+                renderList();
+            }
+        }
+
+        function toggleViewMode() {
+            const btn = document.getElementById('viewModeBtn');
+            if (viewMode === 'all') {
+                viewMode = 'done';
+                btn.textContent = '已完成任务';
+                btn.classList.add('active');
+                btn.style = '';
+            } else if (viewMode === 'done') {
+                viewMode = 'deleted';
+                btn.textContent = '已删除任务';
+                btn.classList.add('active');
+                btn.style.borderColor = 'var(--urgent)';
+                btn.style.color = 'var(--urgent)';
+                btn.style.background = 'rgba(255, 94, 94, 0.15)';
+            } else {
+                viewMode = 'all';
+                btn.textContent = '任务列表';
+                btn.classList.remove('active');
+                btn.style = '';
+            }
+            renderList();
+        }
+
+        function renderCalendar() {
+            const container = document.getElementById('calendarDays');
+            container.innerHTML = '';
+            document.getElementById('monthTitle').textContent = `${currentYear}年 ${currentMonth + 1}月`;
+
+            const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+            const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+            for (let i = firstDay - 1; i >= 0; i--) {
+                const day = daysInPrevMonth - i;
+                container.appendChild(createDayElement(day, currentMonth === 0 ? currentYear - 1 : currentYear, currentMonth === 0 ? 11 : currentMonth - 1, true));
+            }
+            for (let day = 1; day <= daysInMonth; day++) {
+                container.appendChild(createDayElement(day, currentYear, currentMonth, false));
+            }
+            const totalCells = firstDay + daysInMonth;
+            const remaining = (7 - totalCells % 7) % 7;
+            for (let day = 1; day <= remaining; day++) {
+                container.appendChild(createDayElement(day, currentMonth === 11 ? currentYear + 1 : currentYear, currentMonth === 11 ? 0 : currentMonth + 1, true));
+            }
+        }
+
+        function createDayElement(day, year, month, isOtherMonth) {
+            const dateStr = formatDate(new Date(year, month, day));
+            const div = document.createElement('div');
+            div.className = 'calendar-day' + (isOtherMonth ? ' other-month' : '');
+            
+            if (dateStr === formatDate(new Date())) div.classList.add('today');
+            if (dateStr === selectedDate) div.classList.add('selected');
+
+            const hasTodo = todos.some(t => {
+                if (t.isDeleted) return false;
+                if (t.isGlobal) {
+                    if (t.globalStartDate && dateStr < t.globalStartDate) return false;
+                    if (t.globalEndDate && dateStr > t.globalEndDate) return false;
+                    return !(t.completedDates && t.completedDates.includes(dateStr));
+                }
+                else return t.date === dateStr && t.status !== 'done';
+            });
+            div.innerHTML = hasTodo ? `${day}<span class="dot"></span>` : day;
+
+            div.onclick = () => {
+                currentYear = year; currentMonth = month; selectedDate = dateStr;
+                renderCalendar(); renderList();
+            };
+            return div;
+        }
+
+        function renderList() {
+            const list = document.getElementById('todoList');
+            list.innerHTML = '';
+
+            const isToday = selectedDate === formatDate(new Date());
+            document.getElementById('topDateDisplay').textContent = selectedDate + (isToday ? ' (今日)' : '');
+            
+            let globalTodos = todos.filter(t => t.isGlobal && (!t.globalStartDate || selectedDate >= t.globalStartDate) && (!t.globalEndDate || selectedDate <= t.globalEndDate)).sort((a,b) => {
+                const aDone = a.completedDates && a.completedDates.includes(selectedDate) ? 1 : 0;
+                const bDone = b.completedDates && b.completedDates.includes(selectedDate) ? 1 : 0;
+                if (aDone !== bDone) return aDone - bDone;
+                const order = {red:0, yellow:1, green:2};
+                return order[a.urgency] - order[b.urgency];
+            });
+            let dayTodos = todos.filter(t => t.date === selectedDate && !t.isGlobal).sort((a,b) => {
+                if (a.status === 'done' && b.status !== 'done') return 1;
+                if (a.status !== 'done' && b.status === 'done') return -1;
+                const order = {red:0, yellow:1, green:2};
+                return order[a.urgency] - order[b.urgency];
+            });
+
+            if (viewMode === 'deleted') {
+                globalTodos = globalTodos.filter(t => t.isDeleted);
+                dayTodos = dayTodos.filter(t => t.isDeleted);
+            } else {
+                globalTodos = globalTodos.filter(t => !t.isDeleted);
+                dayTodos = dayTodos.filter(t => !t.isDeleted);
+                
+                if (viewMode === 'done') {
+                    globalTodos = globalTodos.filter(t => t.completedDates && t.completedDates.includes(selectedDate));
+                    dayTodos = dayTodos.filter(t => t.status === 'done');
+                }
+            }
+
+            const totalCount = globalTodos.length + dayTodos.length;
+            globalTodos = globalTodos.slice(0, 5);
+            dayTodos = dayTodos.slice(0, 5);
+
+            if (totalCount === 0) {
+                list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:30px 0;font-size:13px;">无对应事项</div>';
+                return;
+            }
+
+            let htmlContent = '';
+            globalTodos.forEach(todo => { htmlContent += createTodoItemHtml(todo); });
+            if (globalTodos.length > 0 && dayTodos.length > 0) {
+                htmlContent += `<hr style="border:none; border-top:1px dashed var(--border); margin:8px 4px;" />`;
+            }
+            dayTodos.forEach(todo => { htmlContent += createTodoItemHtml(todo); });
+
+            list.innerHTML = htmlContent;
+
+            if (totalCount > 10) {
+                const moreDiv = document.createElement('div');
+                moreDiv.style.cssText = 'text-align:center; font-size:11px; color:var(--text-dim); padding-top:4px;';
+                moreDiv.textContent = `...还有更多任务未完全显示`;
+                list.appendChild(moreDiv);
+            }
+        }
+
+        function createTodoItemHtml(todo) {
+            const isDone = todo.isGlobal ? (todo.completedDates && todo.completedDates.includes(selectedDate)) : (todo.status === 'done');
+            const subTasks = todo.subTasks || [];
+            const isOpen = expandedTasks.has(todo.id) ? 'open' : '';
+            
+            let subHtml = `<div class="subtasks-container ${isOpen}">`;
+            subTasks.forEach(sub => {
+                let statusIcon = '';
+                if (viewMode !== 'deleted') {
+                    if (sub.status === 'todo') statusIcon = `<div class="subtask-status status-todo" onclick="cycleSubtaskStatus('${todo.id}', '${sub.id}')"></div>`;
+                    else if (sub.status === 'doing') statusIcon = `<div class="subtask-status status-doing" onclick="cycleSubtaskStatus('${todo.id}', '${sub.id}')">▶</div>`;
+                    else statusIcon = `<div class="subtask-status status-done" onclick="cycleSubtaskStatus('${todo.id}', '${sub.id}')">✔</div>`;
+                } else {
+                    statusIcon = `<div class="subtask-status status-${sub.status}"></div>`;
+                }
+                
+                subHtml += `
+                    <div class="subtask-item">
+                        ${statusIcon}
+                        <div class="subtask-text ${sub.status === 'done' ? 'done' : ''}">${escapeHtml(sub.text)}</div>
+                        ${viewMode !== 'deleted' ? `<div class="subtask-actions"><button onclick="deleteSubtask('${todo.id}', '${sub.id}')">✖</button></div>` : ''}
+                    </div>`;
+            });
+
+            if (viewMode !== 'deleted') {
+                if (addingSubtaskForId === todo.id) {
+                    subHtml += `
+                        <div class="subtask-item" style="margin-top: 4px; display: flex; gap: 4px;">
+                            <input type="text" id="subtaskInput_${todo.id}" placeholder="输入细节内容 (回车保存)" 
+                                   style="flex: 1; background: rgba(0,0,0,0.2); border: 1px solid var(--border); color: var(--text-main); font-size: 11px; padding: 4px 6px; border-radius: 4px; outline: none;" 
+                                   onkeydown="if(event.key==='Enter') saveNewSubtask('${todo.id}')">
+                            <button onclick="saveNewSubtask('${todo.id}')" style="color: var(--accent); background: none; border: none; cursor: pointer; font-size: 11px;">保存</button>
+                            <button onclick="cancelAddSubtask()" style="color: var(--text-dim); background: none; border: none; cursor: pointer; font-size: 11px;">取消</button>
+                        </div></div>`;
+                } else {
+                    subHtml += `<div class="add-subtask" onclick="showSubtaskInput('${todo.id}')">+ 添加细节工作</div></div>`;
+                }
+            } else {
+                subHtml += `</div>`;
+            }
+
+            const hasLink = !!todo.link;
+
+            let actionsHtml = '';
+            if (viewMode === 'deleted') {
+                actionsHtml = `<button onclick="restoreTodo('${todo.id}')" style="color:var(--low);">恢复</button>`;
+            } else {
+                let deleteBtn = '';
+                if (todo.isGlobal && selectedDate !== todo.globalStartDate) {
+                    deleteBtn = `<button onclick="showConfirm('全局任务在沿袭的未来无法删除，必须回到建立该任务的当天 (${todo.globalStartDate}) 才能删除。', null, null, '我知道了', 'var(--accent)', false)">删除</button>`;
+                } else {
+                    deleteBtn = `<button onclick="deleteTodo('${todo.id}')">删除</button>`;
+                }
+                actionsHtml = `<button onclick="editTodo('${todo.id}')">编辑</button>${deleteBtn}`;
+            }
+
+            return `
+                <div class="todo-item ${isDone ? 'done' : ''}">
+                    <div class="item-left-zone">
+                        <div class="urgency-icon urgency-${todo.urgency}" ${viewMode !== 'deleted' ? `onclick="cycleStatus('${todo.id}')"` : ''} title="切换完成状态"></div>
+                        <button class="icon-btn ${hasLink ? '' : 'disabled'}" ${viewMode !== 'deleted' ? `onclick="handleSparkClick(event, '${todo.id}')"` : ''} title="${hasLink ? '灵感笔记' : '未关联目录'}">✨</button>
+                        <button class="icon-btn ${todo.isGlobal ? 'active' : ''}" ${viewMode !== 'deleted' ? `onclick="handleGlobalClick(event, '${todo.id}')"` : ''} title="全局任务">🌍</button>
+                        <button class="expand-btn ${isOpen} ${subTasks.length > 0 ? 'has-sub' : ''}" onclick="toggleSubtasks('${todo.id}')" title="展开/收起细节">▶</button>
+                    </div>
+                    <div class="todo-content">
+                        <div class="todo-text">${escapeHtml(todo.text)}</div>
+                        ${todo.link ? `<div class="todo-link" onclick="openLink('${escapeHtml(todo.link.replace(/\\/g, '\\\\'))}')">📁 ${escapeHtml(todo.link)}</div>` : ''}
+                        ${subHtml}
+                    </div>
+                    <div class="todo-actions">
+                        ${actionsHtml}
+                    </div>
+                </div>`;
+        }
+
+        function handleGlobalClick(event, id) {
+            event.stopPropagation();
+            const todo = todos.find(t => t.id === id);
+            if (!todo) return;
+
+            if (todo.isGlobal) {
+                if (clickTimer) {
+                    clearTimeout(clickTimer);
+                    clickTimer = null;
+                    showConfirm('确定要取消该任务的全局日常设置吗？', () => {
+                        todo.isGlobal = false;
+                        saveData(); renderList(); renderCalendar();
+                    }, null, '取消全局', 'var(--urgent)');
+                } else {
+                    clickTimer = setTimeout(() => { clickTimer = null; }, 300);
+                }
+            } else {
+                document.getElementById('globalTaskId').value = id;
+                document.getElementById('globalDaysSlider').value = 0;
+                document.getElementById('globalDaysDisplay').textContent = '永远';
+                document.getElementById('globalSettingModal').classList.add('show');
+            }
+        }
+
+        function saveGlobalSetting() {
+            const id = document.getElementById('globalTaskId').value;
+            const sliderVal = parseInt(document.getElementById('globalDaysSlider').value);
+            const days = globalDaysMap[sliderVal].days;
+
+            const todo = todos.find(t => t.id === id);
+            if (todo) {
+                todo.isGlobal = true;
+                todo.globalStartDate = selectedDate; 
+                
+                if (days > 0) {
+                    let parts = selectedDate.split('-');
+                    let endDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                    endDateObj.setDate(endDateObj.getDate() + days);
+                    todo.globalEndDate = formatDate(endDateObj);
+                } else {
+                    todo.globalEndDate = null;
+                }
+
+                if (!todo.completedDates) todo.completedDates = [];
+                saveData(); renderList(); renderCalendar();
+            }
+            closeGlobalModal();
+        }
+
+        function closeGlobalModal() {
+            document.getElementById('globalSettingModal').classList.remove('show');
+        }
+
+        async function handleSparkClick(event, id) {
+            event.stopPropagation();
+            const todo = todos.find(t => t.id === id);
+            
+            if (!todo || !todo.link) {
+                showConfirm('请先在编辑中关联本地目录，才能使用火花笔记功能。', null, null, '我知道了', 'var(--accent)', false);
+                return;
+            }
+
+            event.currentTarget.classList.add('active');
+            
+            if (window.pywebview) {
+                await window.pywebview.api.open_spark_file(todo.link);
+            }
+        }
+
+        function deleteTodo(id) {
+            showConfirm('确定删除该任务？', () => {
+                const todo = todos.find(t => t.id === id);
+                if (todo) todo.isDeleted = true; 
+                saveData(); renderList(); renderCalendar();
+            });
+        }
+
+        function restoreTodo(id) {
+            const todo = todos.find(t => t.id === id);
+            if (todo) todo.isDeleted = false;
+            saveData(); renderList(); renderCalendar();
+        }
+
+        function deleteSubtask(todoId, subId) {
+            showConfirm('确定删除该细节工作？', () => {
+                const todo = todos.find(t => t.id === todoId);
+                todo.subTasks = todo.subTasks.filter(s => s.id !== subId);
+                saveData(); renderList();
+            });
+        }
+
+        async function browseFolder() {
+            if (window.pywebview) {
+                const path = await window.pywebview.api.select_folder();
+                if (path) document.getElementById('inputLink').value = path;
+            } else {
+                showConfirm('请使用桌面客户端运行此功能。', null, null, '我知道了', 'var(--accent)', false);
+            }
+        }
+
+        function openLink(path) {
+            if (window.pywebview) {
+                window.pywebview.api.open_folder(path);
+            } else {
+                navigator.clipboard.writeText(path).then(() => {
+                    showConfirm('路径已复制：\n' + path, null, null, '好的', 'var(--accent)', false);
+                });
+            }
+        }
+
+        function cycleStatus(id) {
+            const todo = todos.find(t => t.id === id);
+            if (todo) {
+                if (todo.isGlobal) {
+                    if (!todo.completedDates) todo.completedDates = [];
+                    const idx = todo.completedDates.indexOf(selectedDate);
+                    if (idx > -1) todo.completedDates.splice(idx, 1);
+                    else todo.completedDates.push(selectedDate);
+                } else {
+                    todo.status = todo.status === 'todo' ? 'done' : 'todo';
+                }
+                saveData(); renderList(); renderCalendar();
+            }
+        }
+
+        function saveTodo() {
+            const text = document.getElementById('inputText').value.trim();
+            const link = document.getElementById('inputLink').value.trim();
+            if (!text) return;
+
+            if (editingId) {
+                const todo = todos.find(t => t.id === editingId);
+                todo.text = text; todo.link = link; todo.urgency = selectedUrgency;
+            } else {
+                todos.push({ id: Date.now().toString(), date: selectedDate, text, link, urgency: selectedUrgency, status: 'todo', isGlobal: false, completedDates: [], isDeleted: false });
+            }
+            saveData(); closeModal(); renderList(); renderCalendar();
+        }
+
+        function formatDate(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+        function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+        function changeMonth(offset) { currentMonth += offset; if (currentMonth > 11) { currentMonth = 0; currentYear++; } else if (currentMonth < 0) { currentMonth = 11; currentYear--; } renderCalendar(); }
+        function openModal(id = null) { editingId = id; document.getElementById('modalTitle').textContent = id ? '编辑任务' : '添加任务'; if (id) { const todo = todos.find(t => t.id === id); document.getElementById('inputText').value = todo.text; document.getElementById('inputLink').value = todo.link || ''; selectUrgency(document.querySelector(`.urgency-option[data-val="${todo.urgency}"]`)); } else { document.getElementById('inputText').value = ''; document.getElementById('inputLink').value = ''; selectUrgency(document.querySelector('.urgency-option[data-val="red"]')); } document.getElementById('modal').classList.add('show'); document.getElementById('inputText').focus(); }
+        function closeModal() { document.getElementById('modal').classList.remove('show'); }
+        function selectUrgency(el) { document.querySelectorAll('.urgency-option').forEach(e => e.classList.remove('selected')); el.classList.add('selected'); selectedUrgency = el.dataset.val; }
+        function editTodo(id) { openModal(id); }
+        function toggleSubtasks(id) { if (expandedTasks.has(id)) expandedTasks.delete(id); else expandedTasks.add(id); renderList(); }
+        function showSubtaskInput(todoId) { addingSubtaskForId = todoId; expandedTasks.add(todoId); renderList(); setTimeout(() => { const input = document.getElementById('subtaskInput_' + todoId); if(input) input.focus(); }, 0); }
+        function saveNewSubtask(todoId) { const input = document.getElementById('subtaskInput_' + todoId); if (!input) return; const text = input.value.trim(); if (text) { const todo = todos.find(t => t.id === todoId); if (!todo.subTasks) todo.subTasks = []; todo.subTasks.push({ id: 'sub_' + Date.now(), text: text, status: 'todo' }); saveData(); } addingSubtaskForId = null; renderList(); }
+        function cancelAddSubtask() { addingSubtaskForId = null; renderList(); }
+        function cycleSubtaskStatus(todoId, subId) { const todo = todos.find(t => t.id === todoId); const sub = todo.subTasks.find(s => s.id === subId); if (sub.status === 'todo') sub.status = 'doing'; else if (sub.status === 'doing') sub.status = 'done'; else sub.status = 'todo'; saveData(); renderList(); }
+    
+// 显示所有历史记录
+// 显示所有历史记录（包含关联目录与子任务）
+function showAllRecords() {
+    const container = document.getElementById('recordsListContainer');
+    container.innerHTML = '';
+    
+    // 按日期降序排列
+    const sortedTodos = [...todos].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    if (sortedTodos.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:var(--text-dim); padding: 30px 0; font-size:13px;">暂无任何任务记录</div>';
+    } else {
+        sortedTodos.forEach(todo => {
+            let statusText = '';
+            let statusColor = '';
+            
+            if (todo.isDeleted) { statusText = '已删除'; statusColor = 'var(--urgent)'; }
+            else if (todo.isGlobal) { statusText = '全局日常'; statusColor = 'var(--accent)'; }
+            else if (todo.status === 'done') { statusText = '已完成'; statusColor = 'var(--low)'; }
+            else { statusText = '未完成'; statusColor = 'var(--medium)'; }
+            
+            // 1. 文件夹链接 HTML
+            const linkHtml = todo.link ? `<div class="todo-link" style="margin-top:6px;" onclick="openLink('${escapeHtml(todo.link.replace(/\\/g, '\\\\'))}')">📁 ${escapeHtml(todo.link)}</div>` : '';
+            
+            // 2. 子任务记录 HTML
+            let subTasksHtml = '';
+            if (todo.subTasks && todo.subTasks.length > 0) {
+                subTasksHtml = `<div style="margin-top: 8px; padding-left: 8px; display: flex; flex-direction: column; gap: 4px; border-left: 2px solid var(--border);">`;
+                todo.subTasks.forEach(sub => {
+                    let prefix = sub.status === 'done' ? '✔' : (sub.status === 'doing' ? '▶' : '•');
+                    let doneStyle = sub.status === 'done' ? 'text-decoration: line-through; opacity: 0.5;' : '';
+                    let prefixColor = sub.status === 'done' ? 'var(--low)' : (sub.status === 'doing' ? 'var(--medium)' : 'var(--text-dim)');
+                    
+                    subTasksHtml += `
+                        <div style="display: flex; align-items: flex-start; gap: 6px; font-size: 11px; color: var(--text-dim); ${doneStyle}">
+                            <span style="font-weight: bold; color: ${prefixColor};">${prefix}</span>
+                            <span style="word-break: break-all; line-height: 1.3;">${escapeHtml(sub.text)}</span>
+                        </div>`;
+                });
+                subTasksHtml += `</div>`;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'record-item';
+            div.innerHTML = `
+                <div class="record-item-header">
+                    <span>📅 ${todo.date}</span>
+                    <span style="color: ${statusColor}">${statusText}</span>
+                </div>
+                <div style="color: var(--text-main); word-break: break-all; line-height: 1.4; font-size: 13px;">${escapeHtml(todo.text)}</div>
+                ${linkHtml}
+                ${subTasksHtml}
+            `;
+            container.appendChild(div);
+        });
+    }
+    
+    document.getElementById('allRecordsModal').classList.add('show');
+}
+
+        // 关闭历史记录弹窗
+        function closeAllRecords() {
+            document.getElementById('allRecordsModal').classList.remove('show');
+        }
+
+    </script>
+</body>
+</html>
